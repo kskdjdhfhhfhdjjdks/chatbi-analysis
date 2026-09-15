@@ -1,0 +1,33 @@
+# Netlify 部署配置
+# 文档：https://docs.netlify.com/configure-builds/file-based-configuration/
+
+[build]
+  # 与 package.json 的 build 脚本一致：先 tsc 类型检查，再 vite 打包
+  command = "npm run build"
+  # Vite 默认产物目录
+  publish = "dist"
+
+[build.environment]
+  # 固定 Node 版本，避免 Netlify 默认版本与本地不一致导致构建差异
+  NODE_VERSION = "22"
+
+# SPA 兜底重定向：
+# 当前 Demo 的页面切换用的是内存态 tab（不是 URL 路由），理论上不会出现 404。
+# 但加上这一条可以保证「用户手输任意路径 / 刷新子路径」都能正常回到首页，
+# 也方便后续如果接入 react-router 时无需再改配置。
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# 静态资源长缓存：Vite 产物带内容哈希，可以放心设 1 年
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# HTML 不缓存，确保发版后用户立刻拿到新版本
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
