@@ -39,8 +39,8 @@ export function Evaluation() {
       <div className="mb-5">
         <h1 className="text-[18px] font-semibold mb-1">模型评测看板</h1>
         <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>
-          用 <b style={{ color: 'var(--text)' }}>{stats.total} 条标注用例</b> 量化 ChatBI 的三个核心指标，
-          每次知识库或链路变更后全量回归，指标劣化即阻断发版。
+          展示 <b style={{ color: 'var(--text)' }}>{stats.total} 条预置标注用例</b> 与历史评分。
+          下列数字来自静态标注，不代表当前 DeepSeek 的在线实测效果；工程回归由 npm run check 单独执行。
         </p>
       </div>
 

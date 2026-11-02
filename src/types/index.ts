@@ -224,6 +224,11 @@ export interface ChatMessage {
   clarify?: ClarifyOption[];
   clarifyReason?: string;
   followups?: string[];
+  /** 本条回答由哪个引擎完成语义解析 */
+  engine?: 'llm' | 'rules';
+  /** 引擎说明：降级原因、模型名、耗时 */
+  engineNote?: string;
+  engineLatency?: number;
   timestamp: number;
 }
 

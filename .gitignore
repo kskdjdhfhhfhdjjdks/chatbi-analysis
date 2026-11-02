@@ -17,6 +17,14 @@ dist-ssr
 .chk
 scripts/verify/.out
 
+# 环境变量：DEEPSEEK_API_KEY 绝不能进仓库
+# 线上在 Netlify 后台配置，本地放在 .env
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+
 # 工作记忆与内部笔记
 # 含求职准备、面试话术、能力边界自评等本地内容，绝不入库。
 # 这是一个会被挂在简历上的公开仓库，这些笔记一旦公开会直接削弱 Demo 的可信度。

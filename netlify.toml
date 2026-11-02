@@ -11,6 +11,23 @@
   # 固定 Node 版本，避免 Netlify 默认版本与本地不一致导致构建差异
   NODE_VERSION = "22"
 
+# ============================================================
+# Serverless 函数：DeepSeek 转发代理
+# 作用是藏住 API Key —— 密钥只存在于 Netlify 环境变量里，
+# 永远不会被打包进浏览器代码。
+# ============================================================
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# 前端统一请求 /api/chat，由这一条重写到函数；
+# 必须放在下面的 SPA 兜底之前，否则会被 /* 抢先吃掉。
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+  force = true
+
 # SPA 兜底重定向：
 # 当前 Demo 的页面切换用的是内存态 tab（不是 URL 路由），理论上不会出现 404。
 # 但加上这一条可以保证「用户手输任意路径 / 刷新子路径」都能正常回到首页，

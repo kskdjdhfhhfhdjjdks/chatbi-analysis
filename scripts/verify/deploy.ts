@@ -11,6 +11,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root = process.cwd();
 
@@ -38,11 +39,14 @@ console.log('\n【一】netlify.toml 必要配置');
     const nodeVer = t.match(/NODE_VERSION\s*=\s*"(\d+)"/)?.[1];
     ok(!!nodeVer, `锁定了 Node 版本${nodeVer ? `（${nodeVer}）` : ''}`);
 
-    // 本地 node 主版本应与部署环境一致，否则可能"本地能跑、线上构建失败"
-    const localMajor = process.versions.node.split('.')[0];
+    // 两端满足 Vite 的运行时要求即可，不要求开发机与部署机主版本相同。
+    const supported = (version: string) => {
+      const [major, minor] = version.split('.').map(Number);
+      return major > 22 || (major === 22 && minor >= 12) || (major === 20 && minor >= 19);
+    };
     ok(
-      !nodeVer || nodeVer === localMajor,
-      `部署 Node 版本(${nodeVer ?? '未设'}) 与本地(${localMajor}) 一致`,
+      Number(nodeVer) >= 22 && supported(process.versions.node),
+      `部署 Node ${nodeVer} 与本地 ${process.versions.node} 均满足构建要求`,
     );
 
     ok(
@@ -103,13 +107,10 @@ console.log('\n【四】.gitignore 与仓库卫生');
     ok(/^dist/m.test(g), '忽略 dist（构建产物由 Netlify 现场生成）');
     ok(/scripts\/verify\/\.out/.test(g), '忽略验证套件编译产物');
   }
-  ok(!exists('.env'), '仓库根目录无 .env（本 Demo 不需要任何密钥）');
-  ok(!exists('.env.local'), '无 .env.local');
-
-  // 提醒：如果有 .env 被误提交，要警示
-  const dangerFiles = ['.env', '.env.local', '.env.production'];
-  const found = dangerFiles.filter((f) => exists(f));
-  ok(found.length === 0, `无敏感配置文件${found.length ? `（发现：${found.join(', ')}）` : ''}`);
+  const tracked = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split(/\r?\n/);
+  const leaked = tracked.filter(f => /(^|\/)\.env($|\.)/.test(f) && !f.endsWith('.example'));
+  ok(leaked.length === 0, '真实环境配置未被 Git 跟踪（允许本地 .env）');
+  ok(/DEEPSEEK_API_KEY/.test(read('.env.example')), '提供服务端密钥配置模板');
 }
 
 console.log('\n【五】README 部署指引');

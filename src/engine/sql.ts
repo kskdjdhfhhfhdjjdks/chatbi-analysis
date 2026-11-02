@@ -122,8 +122,7 @@ export function generateSQL(parsed: ParsedQuery): SqlResult {
 
   // 维度列
   const groupDims = dims.filter((d) => d !== 'dt');
-  // 有明确分组维度时优先做维度对比；只有无分组维度时才走趋势
-  const hasTrend = !!time?.trend && groupDims.length === 0;
+  const hasTrend = !!time?.trend;
   if (hasTrend) {
     selectParts.push('dt');
     groupParts.push('dt');
@@ -196,7 +195,7 @@ export function executeSQL(parsed: ParsedQuery): QueryResult {
   }
 
   const groupDims = parsed.dimensions.filter((d) => d.field !== 'dt');
-  const hasTrend = !!time?.trend && groupDims.length === 0;
+  const hasTrend = !!time?.trend;
 
   // 无分组：单值
   if (!hasTrend && groupDims.length === 0) {

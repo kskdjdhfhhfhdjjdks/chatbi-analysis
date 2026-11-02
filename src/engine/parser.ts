@@ -39,7 +39,9 @@ const UNSAFE_PATTERNS = [
   /(修改|改成|改为|改一下|更新|调整)[^，,。？?]{0,10}(数据|数值|记录|[\d０-９]+)/,
   /(新增|添加|插入)[^，,。？?]{0,6}(数据|记录|一条)/,
   /(绕过|跳过|关闭)[^，,。？?]{0,4}(校验|权限|限制|安全)/,
-  /(导出|下载|dump)[^，,。？?]{0,4}(全部|所有|整张|整个)(表|库|数据)/,
+  // 批量导出：不要求后面一定跟「表/库/数据」
+  // 反例教训：「把 dau 导出全部」同样属于越权取数，原规则要求跟名词导致漏拦
+  /(导出|下载|dump)[^，,。？?]{0,6}(全部|所有|整张|整个|全量)/,
   // 敏感字段
   /手机号|身份证|真实姓名|password|密码|passwd|银行卡/i,
 ];
@@ -112,6 +114,9 @@ function monthEnd(iso: string): string {
 function parseTime(q: string): TimeRange | null {
   const TREND = /趋势|走势|变化|按天|每天|逐日|折线|随时间|日趋势|曲线/;
   const trend = TREND.test(q);
+
+  const range = q.match(/(\d{4}-\d{2}-\d{2})\s*(?:至|到|~)\s*(\d{4}-\d{2}-\d{2})/);
+  if (range) return { field: 'dt', start: range[1], end: range[2], label: `${range[1]} 至 ${range[2]}`, trend };
 
   const ymd = q.match(/(\d{4})[年\-/](\d{1,2})[月\-/](\d{1,2})/);
   if (ymd) {
@@ -255,6 +260,7 @@ export interface ParseContext {
   lastMetric?: Metric;
   lastTime?: TimeRange | null;
   lastDimensions?: Dimension[];
+  lastFilters?: ParsedQuery['dimensionValues'];
 }
 
 export function parseQuery(raw: string, ctx: ParseContext = {}): ParsedQuery {
@@ -288,10 +294,13 @@ export function parseQuery(raw: string, ctx: ParseContext = {}): ParsedQuery {
   const metrics: Metric[] = [];
   for (const { alias, metric } of METRIC_ALIAS_INDEX) {
     if (metrics.includes(metric)) continue;
-    if (!work.includes(alias)) continue;
+    // 英文别名按词边界匹配，避免 Android 内的 roi 被识别为 ROI。
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = /[a-z]/i.test(alias) ? new RegExp(`(?<![a-z])${escaped}(?![a-z])`, 'i') : null;
+    if (pattern ? !pattern.test(work) : !work.includes(alias)) continue;
     metrics.push(metric);
     matchedTokens.push({ text: alias, kind: 'metric', label: metric.name });
-    work = work.replace(alias, '　'.repeat(alias.length));
+    work = work.replace(pattern ?? alias, '　'.repeat(alias.length));
   }
 
   // ---- 4.2 维度值匹配 ----
@@ -325,6 +334,11 @@ export function parseQuery(raw: string, ctx: ParseContext = {}): ParsedQuery {
 
   // ---- 4.5 追问上下文继承（Badcase BC-010） ----
   const isFollowup = FOLLOWUP_PATTERNS.some((p) => p.test(q));
+  if (isFollowup && ctx.lastFilters) {
+    for (const filter of ctx.lastFilters) {
+      if (!dimensionValues.some(v => v.dimension.key === filter.dimension.key)) dimensionValues.push(filter);
+    }
+  }
   if (isFollowup && ctx.lastMetric) {
     if (!metrics.includes(ctx.lastMetric)) metrics.push(ctx.lastMetric);
     if (!timeRange && ctx.lastTime) timeRange = ctx.lastTime;

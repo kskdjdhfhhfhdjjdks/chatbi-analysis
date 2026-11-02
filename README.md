@@ -2,9 +2,11 @@
 
 > 用业务语言直接提问，系统自动完成 **语义理解 → SQL 生成 → 安全校验 → 查询执行 → 可视化与归因下钻** 全链路。
 
-一个**纯前端**的 ChatBI（Chat + BI）产品 Demo。内置 20 万行 SaaS 增长主题模拟数据集与完整 NL2SQL 引擎，**无需后端、无需 API Key，可离线运行**。
+一个支持 **DeepSeek 语义解析 + 可验证数据计算** 的 ChatBI 演示项目。内置 202,500 行 SaaS 增长模拟数据，通过服务端代理调用模型；未配置 Key 时可使用离线规则模式。当前 SQL 用于展示，实际结果在浏览器内聚合计算。
 
-**本地运行**：`npm install && npm run dev`
+**本地运行**：`npm install`，复制 `.env.example` 为 `.env` 并填写 `DEEPSEEK_API_KEY`，再执行 `npm run dev`。详细接入说明见文末。
+
+详细架构、问题分析和本轮改动见 [项目理解与优化记录](docs/PROJECT_REVIEW.md)。
 
 > **🔗 在线 Demo**：部署完成后把网址填在这一行（见文末《部署到 Netlify》）
 
@@ -20,7 +22,7 @@
 | 口径模糊时猜一个 | **主动澄清**（「留存」→ 反问 D1/D7/D30） |
 | 主观问题直接编建议 | **MECE 拆解**成可执行子问题，基于客观数据合成结论 |
 | 只测「能不能答对」 | **双向验证**：既测该拦的拦住了，也测不该拦的放过了 |
-| 只展示成功的用例 | 公开 **94.2% / 91.3% / 1.0%** 与 2 条未修复 Badcase，主动暴露能力边界 |
+| 只展示成功的用例 | 公开预置标注评分与未修复 Badcase；静态评分不代表当前 DeepSeek 的实测效果 |
 
 ---
 
@@ -170,7 +172,7 @@ npm run check     # 类型检查 + 全部验证套件
 npm run verify    # 只跑验证套件
 ```
 
-验证套件共 7 组，全部用项目自带的 rolldown 打包执行，**不引入任何测试框架依赖**：
+验证套件共 9 组，全部用项目自带的 rolldown 打包执行，**不引入任何测试框架依赖**：
 
 | 套件 | 保障什么 |
 | --- | --- |
@@ -179,6 +181,8 @@ npm run verify    # 只跑验证套件
 | `consistency` | 数据自洽：评测卡片数字 = 趋势图终点、指标在合理区间、统计文案跟随数据、版本记录单调收敛 |
 | `render` | 组件渲染：MECE 面板的关键文案真的落到 DOM 里，无 `undefined`/`NaN` |
 | `suggest` | 追问建议：元数据引用有效、上下文感知生效、排序去重契约 |
+| `llm` | 模型计划类型、日期、安全覆盖、多序列趋势、筛选继承 |
+| `api` | 客户端到代理到模拟上游的完整请求链路、密钥隔离、限流和异常 |
 | `demo` | 演示动线：README 里列出的每个问题都能跑通 |
 | `deploy` | 部署前置检查：Netlify 配置完整性、`vite base` 白屏排查、产物引用与仓库卫生 |
 
@@ -188,65 +192,74 @@ npm run verify    # 只跑验证套件
 
 # 六、说明
 
-本项目为产品 Demo，使用内置模拟数据集，不连接任何真实数据库。但**语义层、SQL 引擎、安全机制、归因算法、MECE 拆解、评测体系**均按生产级思路实现，并在「处理链路透视」中把每一步的处理结果与耗时透明化展示。
+本项目使用内置模拟数据集，不连接真实数据库。模型负责将问题翻译成受约束的查询计划，程序负责校验和计算；MECE 拆解仍使用预定义模板，并在「处理链路透视」中把每一步的处理结果与耗时透明化展示。
 
 > **一句话总结**：这个项目里，凡是「模型可能编」的地方，我都换成了一套「可验证的机制」。
 
 ---
 
-# 七、部署到 Netlify
+# 七、DeepSeek 接入与部署
 
-项目配置为**纯静态构建**，无后端、无环境变量，可直接部署。
+## 本地启动
 
-## 当前状态
+使用 Node 22.12+ 或 Node 24：
 
-本地 git 仓库已初始化，`main` 分支已推送到 GitHub：
-
-```
-https://github.com/kskdjdhfhhfhdjjdks/chatbi-analysis
-```
-
-**只剩「连 Netlify」一步。**
-
-## 方式 A：GitHub + Netlify 自动部署（推荐，改了代码自动更新）
-
-1. **确认代码已推送**（在项目根目录执行）：
-
-   ```bash
-   git remote -v          # 应显示 origin 指向上面的仓库地址
-   git push origin main   # 有改动时推送，无改动会提示 Everything up-to-date
-   ```
-
-2. **连 Netlify**：
-   - 打开 <https://app.netlify.com> → 用 GitHub 账号登录
-   - `Add new site` → `Import an existing project` → 选 GitHub → 选 `chatbi-analysis` 仓库
-   - 构建配置会被根目录的 `netlify.toml` **自动读取**（`npm run build` + `dist`），一般无需手填
-   - 点 `Deploy`，约 1 分钟完成，拿到形如 `https://chatbi-xxx.netlify.app` 的网址
-
-3. **把网址回填到本 README 顶部的「在线 Demo」行**。
-
-## 方式 B：Netlify Drop（最快，30 秒，但手动更新）
-
-```bash
-npm run build
+```powershell
+npm install
+Copy-Item .env.example .env
 ```
 
-然后把 `dist/` 文件夹**直接拖到** <https://app.netlify.com/drop>，立刻拿到网址。适合临时分享，缺点是改了代码要重新拖一次。
+在本地编辑 `.env`：
 
-## 部署配置说明
+```dotenv
+DEEPSEEK_API_KEY=你的真实密钥
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-flash
+```
 
-`netlify.toml` 已经处理好三件事：
+```powershell
+npm run dev
+```
 
-- **Node 版本锁定为 22**：避免 Netlify 默认版本与本地不一致导致构建产物差异
-- **SPA 重定向** (`/* → /index.html 200`)：当前页面切换用的是内存态 tab，理论不会 404；加上它是为了刷新子路径也能正常回首页
-- **缓存策略**：`/assets/*` 设 1 年强缓存（Vite 产物带内容哈希），`/index.html` 不缓存（保证发版后立刻生效）
+打开终端输出的本地地址。底部显示“已配置”仅表示服务端有密钥，不代表鉴权和额度已验证；发送一个问题后，回答下方应出现“大模型语义解析”与模型名称。未配置 Key、网络失败或非法模型计划会明确标注规则降级。
 
-## 常见问题
+密钥只能放服务端环境变量，不要使用 `VITE_` 前缀，不要填写到聊天输入框或提交 Git。修改 `.env` 或函数代码后重启开发服务器，再点“重新检测”。
 
-| 现象 | 原因与解决 |
+当前模型名称与 JSON 输出协议参照 [DeepSeek 首次调用文档](https://api-docs.deepseek.com/) 和 [JSON Output 文档](https://api-docs.deepseek.com/guides/json_mode/)。模型名称可通过环境变量调整。
+
+## 建议的演示顺序
+
+| 操作 | 验收点 |
 | --- | --- |
-| 构建报 Node 版本错 | `netlify.toml` 已固定 22；若仍报错，到 Site settings → Environment variables 确认没有覆盖 `NODE_VERSION` |
-| 页面白屏 | 打开浏览器控制台看是否有资源 404；确认 `vite.config.ts` 里**没有设置 `base`**（当前无 base，适配根路径部署） |
-| 刷新后 404 | 确认 `netlify.toml` 的 `[[redirects]]` 段已随仓库一起提交 |
+| 昨天的日活是多少 | 模型来源、日期 2026-09-13、数值卡片 |
+| 近7天安卓端日活是多少 | 设备 Android 和明确日期范围 |
+| 那按渠道拆一下 | 保留 Android 和上一轮时间，返回渠道数据 |
+| 各渠道近7天日活趋势 | 五条渠道趋势线、SQL 按日期和渠道分组 |
+| 留存怎么样 | 主动询问次日 / 7 日 / 30 日口径 |
+| 查询2025年1月日活 | 如实提示超出数据范围 |
+| 哪些渠道值得加投 | 四个 MECE 视角，标注为预定义模板 |
+| 帮我删掉昨天数据 | 本地拦截，不调用模型、不执行查询 |
+| 关闭大模型后继续问数 | 规则模式仍可演示，来源标注改变 |
 
-> **为什么不需要后端**：模拟数据集与 NL2SQL 引擎全部打包进前端产物，所有计算在浏览器内完成。好处是**演示零依赖、打开即用、不担心 Key 泄露或额度被刷**——把链接发给别人时不会掉链子。
+数据固定为 2026-03-18 至 2026-09-13，演示时钟为 2026-09-14，相对时间按此计算。没有真实数据的日期不会被替换成其他日期。普通回答的指标数字、图表、数据表来自同一份聚合结果。
+
+## 自动检查
+
+```powershell
+npm run build
+npm run check
+npm run lint
+```
+
+`check` 包含 9 组工程验证；API 套件使用本地模拟上游，不消耗真实模型额度，也不代表真实 DeepSeek 效果评测。评测页面展示预置标注与历史分数。
+
+## 部署到 Netlify
+
+1. 将代码提交并 `git push` 到自己的 GitHub 仓库。
+2. 在 Netlify 导入仓库，使用 `netlify.toml` 的 `npm run build` 和 `dist` 配置。
+3. 在 Netlify 的环境变量中设置 `DEEPSEEK_API_KEY`，可选设置 `DEEPSEEK_MODEL` 和 `DEEPSEEK_BASE_URL`；变量需要在 Functions 运行时可用。
+4. 重新部署，验证 `/api/chat` 的 GET 返回 JSON 配置状态，再在页面发送真实问数问题。
+
+`netlify.toml` 配置了 Functions 目录和 `/api/chat` 重写，必须放在 SPA 兜底之前。Vite 本地开发复用相同函数。`npm run preview` 只预览静态产物，不提供模型代理；仅上传 `dist/` 的静态托管也不包含函数，请使用支持 Functions 的部署流程。
+
+当前 API 使用进程内限流（每 IP 每 10 分钟 30 次），不同 Serverless 实例不共享配额。正式公开使用需增加平台配额和调用监控；当前不支持真实数据库连接、任意 SQL、预测和任意派生指标。

@@ -34,6 +34,16 @@ export interface PipelineOutput {
   chart: ChartSpec | null;
   trace: TraceStep[];
   answer: string;
+  /** 本次由哪个引擎完成语义解析，用于界面如实标注 */
+  engine: 'llm' | 'rules';
+}
+
+export interface PipelineOptions {
+  /** 大模型已解析出的查询计划；校验通过后直接复用，跳过规则解析器 */
+  parsedOverride?: ParsedQuery | null;
+  /** 闲聊 / 能力外场景的直出回答（不含数字，由模型提供措辞） */
+  answerOverride?: string;
+  engine?: 'llm' | 'rules';
 }
 
 const COLORS = ['#2563eb', '#0d9488', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#65a30d'];
@@ -82,17 +92,6 @@ function buildChart(result: QueryResult, metricName: string, unit?: string): Cha
 
   // 维度对比
   const dimKey = cols[0];
-  const isRatio = unit === 'ratio';
-  if (result.rows.length <= 6 && isRatio) {
-    return {
-      type: 'pie',
-      title: `${metricName} 构成`,
-      data: result.rows,
-      xKey: dimKey,
-      series: [{ key: valueKey, name: metricName, color: COLORS[0] }],
-      unit,
-    };
-  }
   return {
     type: 'bar',
     title: `${metricName}（按${dimKey}）`,
@@ -151,6 +150,9 @@ function buildAnswer(
 
   // 趋势
   if (result.columns[0] === 'dt') {
+    if (result.columns.length > 2) {
+      return `${parsed.timeRange?.label ?? '所选周期'}的${metric.name}按维度展示 ${result.columns.length - 1} 条趋势，共 ${result.rows.length} 个日期点。各序列独立计算，详见图表和查询结果。`;
+    }
     const key = result.columns[result.columns.length - 1];
     const first = Number(result.rows[0][key]);
     const last = Number(result.rows[result.rows.length - 1][key]);
@@ -168,7 +170,7 @@ function buildAnswer(
   const sorted = [...result.rows].sort((a, b) => Number(b[key]) - Number(a[key]));
   const top = sorted[0];
   const bottom = sorted[sorted.length - 1];
-  const isRatioMetric = unit === 'ratio' || unit === 'score';
+  const isRatioMetric = !!metric.isRatio || unit === 'ratio' || unit === 'score';
   const total = result.rows.reduce((a, r) => a + Number(r[key]), 0) || 1;
   const share = ((Number(top[key]) / total) * 100).toFixed(1);
   let text = isRatioMetric
@@ -179,7 +181,11 @@ function buildAnswer(
 }
 
 /** 主入口：跑完整个链路 */
-export function runPipeline(question: string, ctx: ParseContext = {}): PipelineOutput {
+export function runPipeline(
+  question: string,
+  ctx: ParseContext = {},
+  opts: PipelineOptions = {},
+): PipelineOutput {
   const t0 = performance.now();
   const trace: TraceStep[] = [];
   const push = (id: string, status: TraceStep['status'], detail: string) => {
@@ -194,15 +200,22 @@ export function runPipeline(question: string, ctx: ParseContext = {}): PipelineO
     });
   };
 
-  // 1. 意图识别
-  const parsed = parseQuery(question, ctx);
+  // 1. 意图识别（语义解析由大模型或规则引擎完成，此处如实标注来源）
+  const baseline = parseQuery(question, ctx);
+  const guarded = baseline.intent === 'unsafe';
+  const engine: 'llm' | 'rules' = !guarded && opts.parsedOverride ? 'llm' : 'rules';
+  const parsed = guarded ? baseline : (opts.parsedOverride ?? baseline);
   const intentLabel =
     parsed.intent === 'unsafe' ? '安全风险' :
     parsed.intent === 'chat' ? '闲聊' :
     parsed.intent === 'strategy' ? '策略咨询' :
     parsed.intent === 'ambiguous' ? '模糊' : '数据问数';
 
-  push('intent', parsed.intent === 'unsafe' ? 'warn' : 'pass', `识别为「${intentLabel}」，决定是否进入取数流程`);
+  push(
+    'intent',
+    parsed.intent === 'unsafe' ? 'warn' : 'pass',
+    `${engine === 'llm' ? '大模型语义层解析' : '规则引擎解析'}：识别为「${intentLabel}」，决定是否进入取数流程`,
+  );
 
   // 2. 语义理解
   const mNames = parsed.metrics.map((m) => m.name).join('、') || '—';
@@ -268,12 +281,12 @@ export function runPipeline(question: string, ctx: ParseContext = {}): PipelineO
   } else {
     sql = generateSQL(parsed);
     push('sql', 'pass', `已生成 ${sql.sql.split('\n')[0].replace('SELECT ', '').slice(0, 60)}…`);
-    push('security', 'pass', '①SQL 黑名单 ②指令模板 ③字段权限 三层校验通过，只读执行');
-    result = executeSQL(parsed);
+    push('security', sql.blocked ? 'warn' : 'pass', sql.blocked ? (sql.blockReason ?? '已阻断') : '①SQL 黑名单 ②指令模板 ③字段权限 三层校验通过，只读执行');
+    result = sql.blocked ? null : executeSQL(parsed);
     push(
       'execute',
-      'pass',
-      result.rows.length ? `返回 ${result.rows.length} 行（数据源：${'dws_growth_daily'}）` : `空结果：${result.emptyReason ?? ''}`,
+      sql.blocked ? 'skip' : 'pass',
+      !result ? '安全校验未通过，未执行查询' : result.rows.length ? `返回 ${result.rows.length} 行（内置模拟数据，浏览器聚合）` : `空结果：${result.emptyReason ?? ''}`,
     );
   }
 
@@ -305,9 +318,11 @@ export function runPipeline(question: string, ctx: ParseContext = {}): PipelineO
         : '该问题不涉及异常排查',
   );
 
-  const answer = mece ? buildMeceAnswer(mece) : buildAnswer(parsed, result, sql, attr);
+  const answer =
+    (!guarded && (parsed.intent === 'chat' || parsed.needClarify) ? opts.answerOverride : undefined) ||
+    (mece ? buildMeceAnswer(mece) : buildAnswer(parsed, result, sql, attr));
 
-  return { parsed, sql, result, attribution: attr, mece, chart, trace, answer };
+  return { parsed, sql, result, attribution: attr, mece, chart, trace, answer, engine };
 }
 
 /** MECE 路径的回答文本 */
